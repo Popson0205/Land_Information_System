@@ -181,6 +181,9 @@ export function DxfPipeline({ file, onExtracted, onError, onBack }: Props) {
             <option value="EPSG:32633">EPSG:32633 — UTM Zone 33N</option>
             <option value="EPSG:26392">EPSG:26392 — Minna / UTM Zone 32N (Nigeria)</option>
             <option value="EPSG:26393">EPSG:26393 — Minna / UTM Zone 33N (Nigeria)</option>
+            <option value="EPSG:26331">EPSG:26331 — Minna / UTM Zone 31N (SW Nigeria: Osun, Ondo, Lagos)</option>
+            <option value="EPSG:26391">EPSG:26391 — Minna / Nigeria Zone 1 (legacy)</option>
+            <option value="EPSG:26392">EPSG:26392 — Minna / Nigeria Zone 2 (legacy)</option>
             <option value="local">Local / Unknown — manual georeferencing needed</option>
           </select>
         </div>
