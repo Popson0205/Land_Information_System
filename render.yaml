@@ -1,0 +1,49 @@
+# Render Blueprint — deploys API (Web Service) + Web (Static Site)
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  # ─── API (Node.js Web Service) ───────────────────────────────────────────────
+  - type: web
+    name: lis-api
+    runtime: node
+    region: oregon       # change to frankfurt or singapore if closer to Nigeria
+    plan: free           # upgrade to starter ($7/mo) for always-on (no spin-down)
+    rootDir: apps/api
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false      # Set manually in Render dashboard — never commit this
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: API_CORS_ORIGIN
+        sync: false      # Set to your Render static site URL after first deploy
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+
+  # ─── Web (Static Site) ───────────────────────────────────────────────────────
+  - type: web
+    name: lis-web
+    runtime: static
+    rootDir: apps/web
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    pullRequestPreviewsEnabled: true
+    envVars:
+      - key: VITE_API_URL
+        sync: false      # Set to your lis-api.onrender.com URL after API deploys
+      - key: VITE_MAPLIBRE_STYLE
+        value: https://demotiles.maplibre.org/style.json
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html   # SPA fallback — required for React Router

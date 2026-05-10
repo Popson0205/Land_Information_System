@@ -1,0 +1,43 @@
+version: "3.9"
+
+# NOTE: No database container — Neon is fully managed.
+# This compose file runs the API server and Martin tile server only.
+
+services:
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    ports:
+      - "4000:4000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - API_PORT=4000
+      - API_CORS_ORIGIN=${API_CORS_ORIGIN:-http://localhost:5173}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+      - R2_BUCKET_NAME=${R2_BUCKET_NAME}
+    volumes:
+      - ./apps/api:/app
+      - /app/node_modules
+    command: npm run dev
+    restart: unless-stopped
+
+  martin:
+    image: ghcr.io/maplibre/martin:latest
+    ports:
+      - "3001:3001"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+    command: >
+      --listen-addresses 0.0.0.0:3001
+      --default-srid 4326
+    restart: unless-stopped
+    depends_on:
+      - api
+
+networks:
+  default:
+    name: lis-network
