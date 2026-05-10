@@ -228,14 +228,14 @@ function ConfirmPanel({ plan, onRegistered, onBack }: {
       </div>
 
       <div className="bg-gray-800 rounded-lg p-3 space-y-1.5 text-xs">
-        {[
+        {(([
           ["CRS", plan.metadata.originalCrs ?? plan.crs],
           ["Surveyor", plan.metadata.surveyorName],
           ["Date", plan.metadata.surveyDate],
           ["Plan Ref", plan.metadata.planRef],
           ["File", plan.fileName],
           plan.closureErrorM !== undefined ? ["Closure Error", `${plan.closureErrorM.toFixed(3)} m`] : null,
-        ].filter(Boolean).map(([label, value]) => value ? (
+        ].filter(Boolean)) as string[][]).map(([label, value]) => value ? (
           <div key={label} className="flex justify-between gap-2">
             <span className="text-gray-500 shrink-0">{label}</span>
             <span className="text-gray-200 text-right font-mono truncate">{value}</span>
