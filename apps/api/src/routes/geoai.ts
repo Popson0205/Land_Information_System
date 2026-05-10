@@ -43,7 +43,7 @@ Confidence: "high" = CRS stated + all coords present. "medium" = inferred CRS or
 
 async function callGeminiVision(imageBase64: string, mimeType: string): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY!;
-  const model = "gemini-1.5-flash";
+  const model = "gemini-2.5-flash";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   const body = {
