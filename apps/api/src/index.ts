@@ -34,11 +34,11 @@ app.get("/health", (_req, res) => {
 });
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
+app.use("/api/parcels/register", registerRouter);  // MUST be before /api/parcels to avoid :id match
 app.use("/api/parcels", parcelsRouter);
 app.use("/api/titles", titlesRouter);
 app.use("/api/surveys", surveysRouter);
 app.use("/api/geoai", geoaiRouter);
-app.use("/api/parcels/register", registerRouter);
 
 // ─── Error handler (must be last) ────────────────────────────────────────────
 app.use(errorHandler);

@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { MapWorkspace } from "./components/map/MapWorkspace";
 import { ParcelSidePanel } from "./components/parcels/ParcelSidePanel";
 import { ParcelRegistry } from "./components/parcels/ParcelRegistry";
@@ -30,6 +30,15 @@ export default function App() {
     refreshParcelsRef.current?.();
     setTimeout(() => flyToParcelRef.current?.(parcelId), 1200);
   }
+
+  const handleCloseImport = useCallback(() => {
+    setImportModalOpen(false);
+    setPreviewPlan(null);
+  }, []);
+
+  const handlePreviewReady = useCallback((plan: ExtractedPlan | null) => {
+    setPreviewPlan(plan);
+  }, []);
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-gray-950">
@@ -73,9 +82,9 @@ export default function App() {
 
       {importModalOpen && (
         <ImportPlanModal
-          onClose={() => { setImportModalOpen(false); setPreviewPlan(null); }}
+          onClose={handleCloseImport}
           onParcelRegistered={handleParcelRegistered}
-          onPreviewReady={(plan) => setPreviewPlan(plan)}
+          onPreviewReady={handlePreviewReady}
         />
       )}
     </div>

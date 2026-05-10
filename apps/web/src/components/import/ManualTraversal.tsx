@@ -45,8 +45,9 @@ const CRS_OPTIONS: { value: CrsCode; label: string }[] = [
 const FENCE_TYPES = ["W/F", "C/F", "B/W", "ROAD", "STREAM", "NONE"];
 
 function reprojectToWgs84(easting: number, northing: number, crs: CrsCode): [number, number] {
-  if (crs === "EPSG:4326") return [easting, northing];
+  if (crs === "EPSG:4326") return [easting, northing]; // already [lng, lat]
   try {
+    // proj4 expects [X, Y] = [Easting, Northing] for projected CRS
     const [lng, lat] = proj4(crs, "EPSG:4326", [easting, northing]);
     return [lng, lat];
   } catch {
@@ -204,7 +205,7 @@ export function ManualTraversal({ onPreview, onComplete, onBack }: Props) {
               type="number"
               value={startPoint.northing || ""}
               onChange={e => setStartPoint(p => ({ ...p, northing: parseFloat(e.target.value) || 0 }))}
-              placeholder="e.g. 887959.725"
+              placeholder="e.g. 887959.725 (large N value)"
               disabled={startSet}
               className="w-full bg-gray-700 border border-gray-600 rounded px-2.5 py-1.5 text-xs text-white
                          placeholder:text-gray-600 focus:outline-none focus:border-blue-500 font-mono disabled:opacity-50"
@@ -216,7 +217,7 @@ export function ManualTraversal({ onPreview, onComplete, onBack }: Props) {
               type="number"
               value={startPoint.easting || ""}
               onChange={e => setStartPoint(p => ({ ...p, easting: parseFloat(e.target.value) || 0 }))}
-              placeholder="e.g. 668351.770"
+              placeholder="e.g. 668351.770 (smaller E value)"
               disabled={startSet}
               className="w-full bg-gray-700 border border-gray-600 rounded px-2.5 py-1.5 text-xs text-white
                          placeholder:text-gray-600 focus:outline-none focus:border-blue-500 font-mono disabled:opacity-50"
@@ -234,6 +235,32 @@ export function ManualTraversal({ onPreview, onComplete, onBack }: Props) {
               {CRS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
+
+          {/* Live WGS84 preview — shows user if coordinates are in the right ballpark */}
+          {startPoint.northing > 0 && startPoint.easting > 0 && !startSet && (() => {
+            try {
+              const [lng, lat] = startPoint.crs === "EPSG:4326"
+                ? [startPoint.easting, startPoint.northing]
+                : (() => { const r = reprojectToWgs84(startPoint.easting, startPoint.northing, startPoint.crs); return r; })();
+              const valid = lat > -90 && lat < 90 && lng > -180 && lng < 180;
+              return valid ? (
+                <div className="col-span-2 bg-blue-950/30 border border-blue-800 rounded px-2.5 py-2 text-xs">
+                  <span className="text-blue-400 font-medium">Preview location: </span>
+                  <span className="text-blue-300 font-mono">
+                    {lat.toFixed(6)}°N, {lng.toFixed(6)}°E
+                  </span>
+                  <a
+                    href={`https://maps.google.com/?q=${lat},${lng}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="ml-2 text-blue-500 underline hover:text-blue-400"
+                  >
+                    verify on Google Maps ↗
+                  </a>
+                </div>
+              ) : null;
+            } catch { return null; }
+          })()}
         </div>
 
         {!startSet ? (

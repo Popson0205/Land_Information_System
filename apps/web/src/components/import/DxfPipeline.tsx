@@ -10,6 +10,28 @@
  */
 import { useEffect, useState } from "react";
 import { Loader2, AlertCircle, MapPin, ChevronRight } from "lucide-react";
+import proj4 from "proj4";
+
+// CRS definitions for reprojection
+proj4.defs("EPSG:4263",  "+proj=longlat +ellps=clrk80 +towgs84=-92,-93,122,0,0,0,0 +no_defs");
+proj4.defs("EPSG:26331", "+proj=utm +zone=31 +a=6378249.145 +b=6356514.966398753 +towgs84=-92,-93,122,0,0,0,0 +units=m +no_defs");
+proj4.defs("EPSG:26332", "+proj=utm +zone=32 +a=6378249.145 +b=6356514.966398753 +towgs84=-92,-93,122,0,0,0,0 +units=m +no_defs");
+proj4.defs("EPSG:26391", "+proj=tmerc +lat_0=4 +lon_0=4.5 +k=0.99975 +x_0=230738.26 +y_0=0 +a=6378249.145 +b=6356514.966398753 +towgs84=-92,-93,122,0,0,0,0 +units=m +no_defs");
+proj4.defs("EPSG:26392", "+proj=tmerc +lat_0=4 +lon_0=10.5 +k=0.99975 +x_0=670553.98 +y_0=0 +a=6378249.145 +b=6356514.966398753 +towgs84=-92,-93,122,0,0,0,0 +units=m +no_defs");
+proj4.defs("EPSG:32632", "+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs");
+proj4.defs("EPSG:32633", "+proj=utm +zone=33 +datum=WGS84 +units=m +no_defs");
+
+function reprojectPolygon(pts: Array<[number, number]>, fromCrs: string): Array<[number, number]> {
+  if (fromCrs === "EPSG:4326") return pts;
+  try {
+    return pts.map(([x, y]) => {
+      const [lng, lat] = proj4(fromCrs, "EPSG:4326", [x, y]);
+      return [lng, lat] as [number, number];
+    });
+  } catch {
+    return pts;
+  }
+}
 import type { ExtractedPlan } from "./ImportPlanModal";
 
 // We load dxf-parser dynamically to avoid SSR issues
@@ -47,11 +69,12 @@ function isRealWorldCoords(polygons: Array<Array<[number, number]>>): boolean {
   return Math.abs(x) > 10000 || Math.abs(y) > 10000;
 }
 
-function polygonToGeoJson(pts: Array<[number, number]>): GeoJSON.Polygon {
-  const ring = [...pts, pts[0]]; // close the ring
+function polygonToGeoJson(pts: Array<[number, number]>, crs: string): GeoJSON.Polygon {
+  const wgs84 = reprojectPolygon(pts, crs);
+  const ring = [...wgs84, wgs84[0]]; // close the ring
   return {
     type: "Polygon",
-    coordinates: [ring.map(([x, y]) => [x, y])],
+    coordinates: [ring],
   };
 }
 
@@ -92,7 +115,7 @@ export function DxfPipeline({ file, onExtracted, onError, onBack }: Props) {
 
   function handleConfirmSelection() {
     const pts = polygons[selectedIdx];
-    const geoJson = polygonToGeoJson(pts);
+    const geoJson = polygonToGeoJson(pts, crsInput);
 
     onExtracted({
       type: "dxf",
