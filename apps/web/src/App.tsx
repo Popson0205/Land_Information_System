@@ -12,8 +12,9 @@ export default function App() {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [previewPlan, setPreviewPlan] = useState<ExtractedPlan | null>(null);
 
-  // Ref to trigger map refresh from outside MapWorkspace
+  // Refs to trigger map actions from outside MapWorkspace
   const refreshParcelsRef = useRef<(() => void) | null>(null);
+  const flyToParcelRef = useRef<((parcelId: string) => void) | null>(null);
 
   function handleParcelClick(parcel: ParcelFeature) {
     setSelectedParcel(parcel);
@@ -25,11 +26,12 @@ export default function App() {
     setSelectedParcel(null);
   }
 
-  function handleParcelRegistered(_parcelId: string, _parcelNumber: string) {
+  function handleParcelRegistered(parcelId: string, _parcelNumber: string) {
     setImportModalOpen(false);
     setPreviewPlan(null);
-    // Refresh map to show the newly registered parcel
+    // Refresh map then fly to the new parcel
     refreshParcelsRef.current?.();
+    setTimeout(() => flyToParcelRef.current?.(parcelId), 800);
   }
 
   return (
@@ -41,6 +43,7 @@ export default function App() {
           onParcelClick={handleParcelClick}
           previewPlan={previewPlan}
           onRefreshReady={(fn) => { refreshParcelsRef.current = fn; }}
+          onFlyToReady={(fn) => { flyToParcelRef.current = fn; }}
         />
 
         {sidePanelOpen && selectedParcel && (

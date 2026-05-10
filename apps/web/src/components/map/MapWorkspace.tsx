@@ -44,12 +44,59 @@ interface Props {
   onParcelClick: (parcel: ParcelFeature) => void;
   previewPlan: ExtractedPlan | null;
   onRefreshReady: (fn: () => void) => void;
+  onFlyToReady: (fn: (parcelId: string) => void) => void;
 }
 
-export function MapWorkspace({ onParcelClick, previewPlan, onRefreshReady }: Props) {
+export function MapWorkspace({ onParcelClick, previewPlan, onRefreshReady, onFlyToReady }: Props) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const mapLoaded = useRef(false);
+
+  const flyToParcel = useCallback(async (parcelId: string) => {
+    if (!map.current || !mapLoaded.current) return;
+    try {
+      const API_URL = import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? "http://localhost:4000";
+      const res = await fetch(`${API_URL}/api/parcels/${parcelId}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const geom = data.geometry;
+      if (!geom) return;
+
+      // Get all coordinates from the geometry
+      const allCoords: number[][] = [];
+      const extract = (coords: any) => {
+        if (typeof coords[0] === "number") allCoords.push(coords);
+        else coords.forEach(extract);
+      };
+      extract(geom.coordinates);
+
+      if (!allCoords.length) return;
+
+      const lngs = allCoords.map(c => c[0]);
+      const lats = allCoords.map(c => c[1]);
+
+      map.current.fitBounds(
+        [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+        { padding: 100, maxZoom: 19, duration: 1500 }
+      );
+
+      // Flash highlight the new parcel
+      setTimeout(() => {
+        if (!map.current) return;
+        map.current.setPaintProperty(PREVIEW_FILL_LAYER, "fill-color", "#27AE60");
+        map.current.setPaintProperty(PREVIEW_FILL_LAYER, "fill-opacity", 0.4);
+        setTimeout(() => {
+          map.current?.setPaintProperty(PREVIEW_FILL_LAYER, "fill-color", "#F1C40F");
+          map.current?.setPaintProperty(PREVIEW_FILL_LAYER, "fill-opacity", 0.25);
+        }, 1200);
+      }, 800);
+    } catch { /* ignore */ }
+  }, []);
+
+  // Expose flyToParcel to parent
+  useEffect(() => {
+    onFlyToReady(flyToParcel);
+  }, [flyToParcel, onFlyToReady]);
 
   const loadParcels = useCallback(async () => {
     if (!map.current || !mapLoaded.current) return;
