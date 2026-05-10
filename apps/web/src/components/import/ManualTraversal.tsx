@@ -22,25 +22,10 @@ import {
 } from "@/types/traversal";
 import type { ExtractedPlan } from "./ImportPlanModal";
 
-// CRS definitions
-proj4.defs("EPSG:4263",  "+proj=longlat +ellps=clrk80 +towgs84=-92,-93,122,0,0,0,0 +no_defs");
-proj4.defs("EPSG:26331", "+proj=utm +zone=31 +a=6378249.145 +b=6356514.966398753 +towgs84=-92,-93,122,0,0,0,0 +units=m +no_defs");
-proj4.defs("EPSG:26332", "+proj=utm +zone=32 +a=6378249.145 +b=6356514.966398753 +towgs84=-92,-93,122,0,0,0,0 +units=m +no_defs");
-proj4.defs("EPSG:26391", "+proj=tmerc +lat_0=4 +lon_0=4.5 +k=0.99975 +x_0=230738.26 +y_0=0 +a=6378249.145 +b=6356514.966398753 +towgs84=-92,-93,122,0,0,0,0 +units=m +no_defs");
-proj4.defs("EPSG:26392", "+proj=tmerc +lat_0=4 +lon_0=10.5 +k=0.99975 +x_0=670553.98 +y_0=0 +a=6378249.145 +b=6356514.966398753 +towgs84=-92,-93,122,0,0,0,0 +units=m +no_defs");
-proj4.defs("EPSG:32632", "+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs");
-proj4.defs("EPSG:32633", "+proj=utm +zone=33 +datum=WGS84 +units=m +no_defs");
+import { CRS_NAMED, registerAllCrs, ACCURACY_STYLES } from "@/lib/crs-registry";
 
-const CRS_OPTIONS: { value: CrsCode; label: string }[] = [
-  { value: "EPSG:26331", label: "Universal Zone 31 — Minna UTM 31N (Lagos, Osun, Ondo)" },
-  { value: "EPSG:26332", label: "Universal Zone 32 — Minna UTM 32N (SE Nigeria)" },
-  { value: "EPSG:4263",  label: "Minna / Clarke 1880 (geographic, degrees)" },
-  { value: "EPSG:26391", label: "Minna Nigeria Zone 1 (legacy)" },
-  { value: "EPSG:26392", label: "Minna Nigeria Zone 2 (legacy)" },
-  { value: "EPSG:32632", label: "WGS84 UTM Zone 32N" },
-  { value: "EPSG:32633", label: "WGS84 UTM Zone 33N" },
-  { value: "EPSG:4326",  label: "WGS84 — Lat/Lng (GPS)" },
-];
+// Register all CRS definitions from the authoritative registry
+registerAllCrs(proj4);
 
 const FENCE_TYPES = ["W/F", "C/F", "B/W", "ROAD", "STREAM", "NONE"];
 
@@ -224,7 +209,17 @@ export function ManualTraversal({ onPreview, onComplete, onBack }: Props) {
             />
           </div>
           <div className="col-span-2">
-            <label className="text-xs text-gray-500 block mb-1">Coordinate System (CRS)</label>
+            <label className="text-xs text-gray-500 block mb-1">
+              Coordinate System (CRS)
+              {startPoint.crs && (() => {
+                const def = CRS_NAMED.find(c => c.code === startPoint.crs);
+                return def ? (
+                  <span className={`ml-2 font-medium ${ACCURACY_STYLES[def.accuracy]}`}>
+                    ± {def.accuracy}
+                  </span>
+                ) : null;
+              })()}
+            </label>
             <select
               value={startPoint.crs}
               onChange={e => setStartPoint(p => ({ ...p, crs: e.target.value as CrsCode }))}
@@ -232,7 +227,9 @@ export function ManualTraversal({ onPreview, onComplete, onBack }: Props) {
               className="w-full bg-gray-700 border border-gray-600 rounded px-2.5 py-1.5 text-xs text-white
                          focus:outline-none focus:border-blue-500 disabled:opacity-50"
             >
-              {CRS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {CRS_NAMED.map(o => (
+                <option key={o.code} value={o.code}>{o.label}</option>
+              ))}
             </select>
           </div>
 

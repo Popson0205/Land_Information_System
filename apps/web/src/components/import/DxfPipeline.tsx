@@ -12,14 +12,8 @@ import { useEffect, useState } from "react";
 import { Loader2, AlertCircle, MapPin, ChevronRight } from "lucide-react";
 import proj4 from "proj4";
 
-// CRS definitions for reprojection
-proj4.defs("EPSG:4263",  "+proj=longlat +ellps=clrk80 +towgs84=-92,-93,122,0,0,0,0 +no_defs");
-proj4.defs("EPSG:26331", "+proj=utm +zone=31 +a=6378249.145 +b=6356514.966398753 +towgs84=-92,-93,122,0,0,0,0 +units=m +no_defs");
-proj4.defs("EPSG:26332", "+proj=utm +zone=32 +a=6378249.145 +b=6356514.966398753 +towgs84=-92,-93,122,0,0,0,0 +units=m +no_defs");
-proj4.defs("EPSG:26391", "+proj=tmerc +lat_0=4 +lon_0=4.5 +k=0.99975 +x_0=230738.26 +y_0=0 +a=6378249.145 +b=6356514.966398753 +towgs84=-92,-93,122,0,0,0,0 +units=m +no_defs");
-proj4.defs("EPSG:26392", "+proj=tmerc +lat_0=4 +lon_0=10.5 +k=0.99975 +x_0=670553.98 +y_0=0 +a=6378249.145 +b=6356514.966398753 +towgs84=-92,-93,122,0,0,0,0 +units=m +no_defs");
-proj4.defs("EPSG:32632", "+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs");
-proj4.defs("EPSG:32633", "+proj=utm +zone=33 +datum=WGS84 +units=m +no_defs");
+import { CRS_NAMED, registerAllCrs, ACCURACY_STYLES } from "@/lib/crs-registry";
+registerAllCrs(proj4);
 
 function reprojectPolygon(pts: Array<[number, number]>, fromCrs: string): Array<[number, number]> {
   if (fromCrs === "EPSG:4326") return pts;
@@ -198,15 +192,9 @@ export function DxfPipeline({ file, onExtracted, onError, onBack }: Props) {
             className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white
                        focus:outline-none focus:border-blue-500 transition-colors"
           >
-            <option value="EPSG:4326">EPSG:4326 — WGS84 (GPS / modern surveys)</option>
-            <option value="EPSG:4263">EPSG:4263 — Minna / Clarke 1880 (Nigeria legacy)</option>
-            <option value="EPSG:32632">EPSG:32632 — UTM Zone 32N</option>
-            <option value="EPSG:32633">EPSG:32633 — UTM Zone 33N</option>
-            <option value="EPSG:26392">EPSG:26392 — Minna / UTM Zone 32N (Nigeria)</option>
-            <option value="EPSG:26393">EPSG:26393 — Minna / UTM Zone 33N (Nigeria)</option>
-            <option value="EPSG:26331">EPSG:26331 — Minna / UTM Zone 31N (SW Nigeria: Osun, Ondo, Lagos)</option>
-            <option value="EPSG:26391">EPSG:26391 — Minna / Nigeria Zone 1 (legacy)</option>
-            <option value="EPSG:26392">EPSG:26392 — Minna / Nigeria Zone 2 (legacy)</option>
+            {CRS_NAMED.map(o => (
+              <option key={o.code} value={o.code}>{o.label} (±{o.accuracy})</option>
+            ))}
             <option value="local">Local / Unknown — manual georeferencing needed</option>
           </select>
         </div>
