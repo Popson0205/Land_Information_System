@@ -6,19 +6,20 @@
   box-sizing: border-box;
 }
 
-body {
+html, body, #root {
   margin: 0;
   padding: 0;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
+  background: #030712;
 }
 
-/* MapLibre canvas fills its container */
 .maplibregl-map {
   width: 100%;
   height: 100%;
 }
 
-/* Custom map controls */
 .maplibregl-ctrl-group {
   background: #1e293b !important;
   border: 1px solid #334155 !important;
