@@ -8,6 +8,7 @@ import { parcelsRouter } from "./routes/parcels.js";
 import { titlesRouter } from "./routes/titles.js";
 import { surveysRouter } from "./routes/surveys.js";
 import { geoaiRouter } from "./routes/geoai.js";
+import { registerRouter } from "./routes/register.js";
 import { errorHandler } from "./middleware/error-handler.js";
 
 const app = express();
@@ -37,6 +38,7 @@ app.use("/api/parcels", parcelsRouter);
 app.use("/api/titles", titlesRouter);
 app.use("/api/surveys", surveysRouter);
 app.use("/api/geoai", geoaiRouter);
+app.use("/api/parcels/register", registerRouter);
 
 // ─── Error handler (must be last) ────────────────────────────────────────────
 app.use(errorHandler);

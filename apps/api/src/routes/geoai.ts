@@ -9,51 +9,57 @@ if (!process.env.GEMINI_API_KEY) {
 }
 
 const SURVEY_EXTRACTION_PROMPT = `
-You are a geospatial data extraction specialist for Nigerian cadastral survey plans. Analyze this survey plan image and extract all spatial data.
+You are a Nigerian cadastral survey plan specialist. Extract the TRAVERSAL DATA from this survey plan.
 
-NIGERIAN PLAN SPECIFICS:
-- Corner points are labeled as SC/OS BBXXXXJP (Survey Control / Official Survey beacons)
-- CRS is usually "Universal Zone 31" or "Universal Zone 32" = EPSG:26331 or EPSG:26332 (Minna UTM)
-- Older plans use "Minna" datum with Clarke 1880 ellipsoid
-- Grid reference lines on margins show Northing (mN) and Easting (mE) values
-- Boundary lines show: bearing (e.g. 121° 46') and distance (e.g. 24.47m)
-- W/F = Wire Fence boundary type
-- If explicit point coordinates are NOT shown per beacon, extract the TRAVERSAL DATA:
-  bearings and distances between beacons, plus the starting point coordinates from the grid margin
+A traversal is: starting point coordinates + a sequence of bearing/distance legs that trace the boundary.
+This is exactly how AutoCAD plots land parcels — start at a known point, follow each bearing and distance, close back to start.
 
-EXTRACT IN THIS ORDER:
-1. CRS/Origin label (e.g. "Universal Zone 31" → EPSG:26331)
-2. Grid margin values (Northing mN and Easting mE shown on plan edges) — these are the starting point coordinates
-3. Corner beacon labels (SC/OS BBXXXXJP)
-4. Boundary traversal: bearing + distance for each leg
-5. Area, scale, plan number, owner, surveyor, date
+EXTRACT THIS EXACT FORMAT:
 
-Return ONLY valid JSON — no explanation, no markdown, just the JSON object:
+1. STARTING POINT: The first beacon's Northing (mN) and Easting (mE) from the plan margins or title block.
+   Nigerian plans show grid reference lines on the margins labeled "887959.725mN" and "668351.770mE" — these are the starting coordinates.
+
+2. LEGS: Each boundary line has a bearing (e.g. "121° 46'") and distance (e.g. "24.47m").
+   Read them in order around the boundary. Also note fence type (W/F = wire fence, C/F = concrete fence, etc.)
+
+3. METADATA: Plan number, owner name, surveyor name, date, area, scale, CRS/origin, LGA, state, OS-APPSN number.
+
+4. CRS: Look for "Universal Zone 31" → EPSG:26331, "Universal Zone 32" → EPSG:26332, "Minna" → EPSG:4263.
+
+Return ONLY valid JSON — no explanation text before or after:
 {
   "crs": "EPSG:26331",
-  "crsLabel": "Universal Zone 31 (Minna UTM)",
+  "crsLabel": "Universal Zone 31",
   "confidence": "high",
-  "points": [
-    { "label": "BB8215JP", "northing": 887959.725, "easting": 668351.770 }
+  "startPoint": {
+    "beaconLabel": "BB8215JP",
+    "northing": 887959.725,
+    "easting": 668351.770
+  },
+  "legs": [
+    { "fromBeacon": "BB8215JP", "toBeacon": "BB8216JP", "bearingDeg": 121, "bearingMin": 46, "bearingSec": 0, "distanceM": 24.47, "fenceType": "W/F" },
+    { "fromBeacon": "BB8216JP", "toBeacon": "BB8217JP", "bearingDeg": 222, "bearingMin": 30, "bearingSec": 0, "distanceM": 43.20, "fenceType": "W/F" },
+    { "fromBeacon": "BB8217JP", "toBeacon": "BB8218JP", "bearingDeg": 310, "bearingMin": 30, "bearingSec": 0, "distanceM": 30.35, "fenceType": "W/F" },
+    { "fromBeacon": "BB8218JP", "toBeacon": "BB8215JP", "bearingDeg": 51,  "bearingMin": 30, "bearingSec": 0, "distanceM": 40.20, "fenceType": "W/F" }
   ],
-  "metesAndBounds": [
-    { "from": "BB8215JP", "to": "BB8216JP", "bearingDecimal": 121.767, "distanceM": 24.47 },
-    { "from": "BB8216JP", "to": "BB8217JP", "bearingDecimal": 222.5, "distanceM": 43.20 },
-    { "from": "BB8217JP", "to": "BB8218JP", "bearingDecimal": 310.5, "distanceM": 30.35 },
-    { "from": "BB8218JP", "to": "BB8215JP", "bearingDecimal": 51.5, "distanceM": 40.20 }
-  ],
-  "pointOfBeginning": "BB8215JP",
   "metadata": {
+    "ownerName": "Mr. Emmanuel Oyetunde Fasola and Mrs. Kemi Oyetunde Fasola",
     "surveyorName": "Surv. A. O. Adeyemo",
     "surveyDate": "",
     "planRef": "OS/2428/2024/031",
-    "declaredAreaSqm": 1118.152
+    "osAppsn": "OS-APPSN 01S",
+    "declaredAreaSqm": 1118.152,
+    "scale": "1:500",
+    "village": "Durodola Village",
+    "address": "Along Odo-Afa Road, Owode-Ede",
+    "lga": "Ede South",
+    "state": "Osun"
   },
-  "notes": "Any ambiguities"
+  "notes": "Any ambiguities or warnings"
 }
 
-IMPORTANT: If you cannot find explicit point coordinates but CAN find bearings and distances, set confidence to "medium" and populate metesAndBounds. The system will compute coordinates from the traversal. Always return valid JSON.
-\``;
+Confidence: "high" = CRS stated + all bearings/distances readable. "medium" = some values unclear. "low" = mostly unreadable.
+`;
 
 async function callGeminiVision(imageBase64: string, mimeType: string): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY!;
@@ -156,41 +162,37 @@ geoaiRouter.post("/analyze", async (req: Request, res: Response, next: NextFunct
     }
 
     let geoJson: any = null;
+    let closureErrorM: number | null = null;
 
-    // Strategy 1: explicit point coordinates
-    if (extraction.points && extraction.points.length >= 3) {
-      geoJson = {
-        type: "Polygon",
-        coordinates: [[
-          ...extraction.points.map((pt: any) => [pt.easting, pt.northing]),
-          [extraction.points[0].easting, extraction.points[0].northing],
-        ]],
-        _crs: extraction.crs,
-      };
-    }
-    // Strategy 2: compute from metes-and-bounds traversal if no explicit coords
-    else if (
-      extraction.metesAndBounds &&
-      extraction.metesAndBounds.length >= 3 &&
-      extraction.points &&
-      extraction.points.length >= 1
-    ) {
-      const startPt = extraction.points[0];
-      let curN = startPt.northing;
-      let curE = startPt.easting;
-      const coords: [number, number][] = [[curE, curN]];
+    // Compute polygon from traversal (startPoint + legs)
+    if (extraction.startPoint && extraction.legs && extraction.legs.length >= 3) {
+      const start = extraction.startPoint;
+      let curN = start.northing;
+      let curE = start.easting;
+      const projCoords: [number, number][] = [[curE, curN]];
 
-      for (const leg of extraction.metesAndBounds) {
-        const bearingRad = (leg.bearingDecimal * Math.PI) / 180;
+      for (const leg of extraction.legs) {
+        const bearingDec = leg.bearingDeg + leg.bearingMin / 60 + (leg.bearingSec ?? 0) / 3600;
+        const bearingRad = (bearingDec * Math.PI) / 180;
         curE += leg.distanceM * Math.sin(bearingRad);
         curN += leg.distanceM * Math.cos(bearingRad);
-        coords.push([curE, curN]);
+        projCoords.push([curE, curN]);
       }
-      coords.push(coords[0]); // close ring
 
+      // Closure error
+      const dE = projCoords[projCoords.length-1][0] - projCoords[0][0];
+      const dN = projCoords[projCoords.length-1][1] - projCoords[0][1];
+      closureErrorM = Math.sqrt(dE*dE + dN*dN);
+
+      // Close the ring
+      projCoords.push(projCoords[0]);
+
+      // Reproject to WGS84 using proj4 (server-side)
+      // Note: proj4 is not available server-side here, so we return projected coords
+      // with _crs flag — the frontend reprojects via proj4js
       geoJson = {
         type: "Polygon",
-        coordinates: [coords],
+        coordinates: [projCoords],
         _crs: extraction.crs,
       };
     }

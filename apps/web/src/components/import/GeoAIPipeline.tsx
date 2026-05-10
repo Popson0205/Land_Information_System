@@ -131,22 +131,37 @@ export function GeoAIPipeline({ file, fileType, onExtracted, onError, onBack }: 
 
     try {
       const crs: string = extraction.crs ?? "EPSG:4326";
-      const points: Array<{ northing: number; easting: number }> = extraction.points ?? [];
-
-      let wgs84Coords: Array<[number, number]> = [];
+      let geoJson: GeoJSON.Polygon | null = null;
       let closureErrorM = 0;
+      let traversal = undefined;
 
-      if (points.length >= 3) {
-        wgs84Coords = reprojectToWgs84(points, crs);
-        closureErrorM = computeClosureError(wgs84Coords);
+      // New traversal format (startPoint + legs)
+      if (extraction.startPoint && extraction.legs && extraction.legs.length >= 3) {
+        const start = extraction.startPoint;
+        // Compute projected coords first
+        let curE = start.easting;
+        let curN = start.northing;
+        const projCoords: Array<[number, number]> = [[curE, curN]];
+
+        for (const leg of extraction.legs) {
+          const bearingDec = leg.bearingDeg + leg.bearingMin / 60 + (leg.bearingSec ?? 0) / 3600;
+          const bearingRad = (bearingDec * Math.PI) / 180;
+          curE += leg.distanceM * Math.sin(bearingRad);
+          curN += leg.distanceM * Math.cos(bearingRad);
+          projCoords.push([curE, curN]);
+        }
+
+        // Closure error
+        const dE = projCoords[projCoords.length-1][0] - projCoords[0][0];
+        const dN = projCoords[projCoords.length-1][1] - projCoords[0][1];
+        closureErrorM = Math.sqrt(dE*dE + dN*dN);
+
+        // Reproject to WGS84
+        const wgs84Coords = projCoords.map(([e, n]) => reprojectToWgs84([{easting: e, northing: n}], crs)[0]);
+        geoJson = { type: "Polygon", coordinates: [[...wgs84Coords, wgs84Coords[0]]] };
+
+        traversal = { startPoint: extraction.startPoint, legs: extraction.legs };
       }
-
-      const geoJson: GeoJSON.Polygon | null = wgs84Coords.length >= 3
-        ? {
-            type: "Polygon",
-            coordinates: [[...wgs84Coords, wgs84Coords[0]]],
-          }
-        : null;
 
       onExtracted({
         type: "scan",
@@ -161,7 +176,15 @@ export function GeoAIPipeline({ file, fileType, onExtracted, onError, onBack }: 
           planRef: extraction.metadata?.planRef || undefined,
           originalCrs: crs,
           declaredAreaSqm: extraction.metadata?.declaredAreaSqm ?? null,
+          ownerName: extraction.metadata?.ownerName || undefined,
+          village: extraction.metadata?.village || undefined,
+          lga: extraction.metadata?.lga || undefined,
+          state: extraction.metadata?.state || undefined,
+          osAppsn: extraction.metadata?.osAppsn || undefined,
+          scale: extraction.metadata?.scale || undefined,
+          address: extraction.metadata?.address || undefined,
         },
+        traversal,
         rawExtraction: extraction,
       });
     } catch (err: any) {
