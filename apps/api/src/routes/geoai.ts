@@ -126,7 +126,13 @@ geoaiRouter.post("/analyze", async (req: Request, res: Response, next: NextFunct
 
     let extraction: any;
     try {
-      const jsonStr = rawContent.replace(/```json\n?|\n?```/g, "").trim();
+      // Strategy 1: strip markdown code fences
+      let jsonStr = rawContent.replace(/```json\n?|\n?```/g, "").trim();
+      // Strategy 2: extract first {...} block if still not valid JSON
+      if (!jsonStr.startsWith("{")) {
+        const match = jsonStr.match(/\{[\s\S]*\}/);
+        if (match) jsonStr = match[0];
+      }
       extraction = JSON.parse(jsonStr);
     } catch {
       return res.status(422).json({
