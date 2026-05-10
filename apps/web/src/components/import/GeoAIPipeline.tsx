@@ -11,6 +11,7 @@
 import { useEffect, useState } from "react";
 import { Loader2, AlertCircle, CheckCircle2, ChevronRight, Eye } from "lucide-react";
 import proj4 from "proj4";
+import { getApiUrl } from "@/lib/api";
 import type { ExtractedPlan } from "./ImportPlanModal";
 
 // ─── Nigerian CRS definitions for proj4 ──────────────────────────────────────
@@ -84,7 +85,7 @@ export function GeoAIPipeline({ file, fileType, onExtracted, onError, onBack }: 
   const [apiError, setApiError] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
 
-  const API_URL = import.meta.env.VITE_API_URL ?? "";
+  
 
   useEffect(() => {
     (async () => {
@@ -92,7 +93,7 @@ export function GeoAIPipeline({ file, fileType, onExtracted, onError, onBack }: 
         const base64 = await fileToBase64(file);
         const mime = mimeFromFile(file, fileType);
 
-        const res = await fetch(`${API_URL}/api/geoai/analyze`, {
+        const res = await fetch(`${getApiUrl()}/api/geoai/analyze`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ imageBase64: base64, mimeType: mime }),

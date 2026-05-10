@@ -1,4 +1,6 @@
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
+// API base URL — set VITE_API_URL in Render environment before building
+// Falls back to localhost only for local development
+const API_URL = import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? "http://localhost:4000";
 
 export async function fetchParcels(params?: {
   status?: string;
@@ -19,12 +21,6 @@ export async function fetchParcelDetail(id: string) {
   return res.json();
 }
 
-export async function analyzeWithGeoAI(imageBase64: string, mimeType: string) {
-  const res = await fetch(`${API_URL}/api/geoai/analyze`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ imageBase64, mimeType }),
-  });
-  if (!res.ok) throw new Error(`GeoAI analysis failed: ${res.statusText}`);
-  return res.json();
+export function getApiUrl(): string {
+  return API_URL;
 }

@@ -1,3 +1,4 @@
+import { getApiUrl } from "@/lib/api";
 import { useState, useRef, useCallback } from "react";
 import { X, Upload, FileText, Image, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { DxfPipeline } from "./DxfPipeline";
@@ -184,7 +185,7 @@ function ConfirmPanel({ plan, onRegistered, onBack }: {
   const [parcelNumber, setParcelNumber] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const API_URL = import.meta.env.VITE_API_URL ?? "";
+  
 
   const CONF: Record<string, string> = {
     high:   "bg-green-900/40 text-green-400 border-green-700",
@@ -198,7 +199,7 @@ function ConfirmPanel({ plan, onRegistered, onBack }: {
     if (!plan.geoJson) { setError("No geometry to register."); return; }
     setSubmitting(true); setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/geoai/confirm`, {
+      const res = await fetch(`${getApiUrl()}/api/geoai/confirm`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
