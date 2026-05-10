@@ -1,16 +1,12 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { sql } from "../lib/db.js";
 import { z } from "zod";
-import OpenAI from "openai";
 
 export const geoaiRouter = Router();
 
-// Check key at module load — logs a clear warning on startup if missing
-if (!process.env.OPENAI_API_KEY) {
-  console.warn("⚠️  OPENAI_API_KEY is not set — GeoAI endpoints will return 503");
+if (!process.env.GEMINI_API_KEY) {
+  console.warn("⚠️  GEMINI_API_KEY is not set — GeoAI endpoints will return 503");
 }
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY ?? "missing" });
 
 const SURVEY_EXTRACTION_PROMPT = `
 You are a geospatial data extraction specialist. Analyze this survey plan image and extract:
@@ -45,11 +41,53 @@ Return ONLY valid JSON in this exact structure:
 Confidence: "high" = CRS stated + all coords present. "medium" = inferred CRS or metes-and-bounds only. "low" = handwritten or missing data.
 `;
 
+async function callGeminiVision(imageBase64: string, mimeType: string): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY!;
+  const model = "gemini-1.5-flash";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const body = {
+    contents: [{
+      parts: [
+        {
+          inline_data: {
+            mime_type: mimeType,
+            data: imageBase64,
+          },
+        },
+        {
+          text: SURVEY_EXTRACTION_PROMPT,
+        },
+      ],
+    }],
+    generationConfig: {
+      temperature: 0.1,
+      maxOutputTokens: 2048,
+    },
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    let errMsg = `Gemini API error ${res.status}`;
+    try { errMsg = JSON.parse(text)?.error?.message ?? errMsg; } catch {}
+    throw new Error(errMsg);
+  }
+
+  const data = JSON.parse(text);
+  return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+}
+
 geoaiRouter.post("/analyze", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (!process.env.OPENAI_API_KEY) {
+    if (!process.env.GEMINI_API_KEY) {
       return res.status(503).json({
-        error: "GeoAI not available — OPENAI_API_KEY is not configured on this server. Add it in your Render environment variables.",
+        error: "GeoAI not available — GEMINI_API_KEY is not set. Get a free key at aistudio.google.com/apikey and add it to your Render environment variables.",
       });
     }
 
@@ -64,40 +102,27 @@ geoaiRouter.post("/analyze", async (req: Request, res: Response, next: NextFunct
 
     const { imageBase64, mimeType } = parseResult.data;
 
-    // Check payload size — OpenAI Vision has a ~20MB image limit
     const estimatedBytes = imageBase64.length * 0.75;
     if (estimatedBytes > 18 * 1024 * 1024) {
       return res.status(413).json({
-        error: "Image too large for GeoAI analysis. Please resize to under 18 MB and try again.",
+        error: "Image too large. Please resize to under 18 MB and try again.",
       });
     }
 
-    let response;
+    // Gemini doesn't support PDF directly — convert to jpeg guidance
+    if (mimeType === "application/pdf") {
+      return res.status(415).json({
+        error: "PDF not supported directly by Gemini free tier. Please convert your PDF to a JPG or PNG image first, then upload.",
+      });
+    }
+
+    let rawContent: string;
     try {
-      response = await openai.chat.completions.create({
-        model: "gpt-4o",
-        max_tokens: 2000,
-        messages: [{
-          role: "user",
-          content: [
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:${mimeType};base64,${imageBase64}`,
-                detail: "high",
-              },
-            },
-            { type: "text", text: SURVEY_EXTRACTION_PROMPT },
-          ],
-        }],
-      });
-    } catch (openaiErr: any) {
-      const msg = openaiErr?.message ?? "OpenAI API call failed";
-      console.error("[GeoAI] OpenAI error:", msg);
-      return res.status(502).json({ error: `OpenAI error: ${msg}` });
+      rawContent = await callGeminiVision(imageBase64, mimeType);
+    } catch (err: any) {
+      console.error("[GeoAI] Gemini error:", err.message);
+      return res.status(502).json({ error: `Gemini error: ${err.message}` });
     }
-
-    const rawContent = response.choices[0]?.message?.content ?? "";
 
     let extraction: any;
     try {
