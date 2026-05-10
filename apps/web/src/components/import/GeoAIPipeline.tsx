@@ -98,12 +98,20 @@ export function GeoAIPipeline({ file, fileType, onExtracted, onError, onBack }: 
           body: JSON.stringify({ imageBase64: base64, mimeType: mime }),
         });
 
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.error ?? `API error ${res.status}`);
+        const text = await res.text();
+        let data: any;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          throw new Error(
+            res.ok
+              ? `Server returned invalid response (status ${res.status})`
+              : `API error ${res.status}: ${text.slice(0, 200) || "empty response"}`
+          );
         }
-
-        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data?.error ?? `API error ${res.status}`);
+        }
         setExtraction(data.extraction);
         setStatus("review");
       } catch (err: any) {

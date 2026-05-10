@@ -1,24 +1,17 @@
-/**
- * GeoAI Route — Auto-georeferencing pipeline
- *
- * POST /api/geoai/analyze
- *   Accepts a base64-encoded image of a survey plan.
- *   Sends it to GPT-4o Vision to extract coordinates, CRS, and metadata.
- *   Returns structured extraction result + reconstructed GeoJSON polygon.
- *
- * POST /api/geoai/confirm
- *   Confirms the auto-georeferenced parcel and writes it to the DB.
- */
-import { Router } from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import { sql } from "../lib/db.js";
 import { z } from "zod";
 import OpenAI from "openai";
 
 export const geoaiRouter = Router();
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Check key at module load — logs a clear warning on startup if missing
+if (!process.env.OPENAI_API_KEY) {
+  console.warn("⚠️  OPENAI_API_KEY is not set — GeoAI endpoints will return 503");
+}
 
-// ─── Prompt ───────────────────────────────────────────────────────────────────
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY ?? "missing" });
+
 const SURVEY_EXTRACTION_PROMPT = `
 You are a geospatial data extraction specialist. Analyze this survey plan image and extract:
 
@@ -49,33 +42,42 @@ Return ONLY valid JSON in this exact structure:
   "notes": "Any ambiguities or extraction warnings"
 }
 
-Confidence levels:
-- "high": CRS explicitly stated + all corner coordinates present
-- "medium": CRS inferred OR metes-and-bounds only
-- "low": Handwritten, illegible, or missing critical data
+Confidence: "high" = CRS stated + all coords present. "medium" = inferred CRS or metes-and-bounds only. "low" = handwritten or missing data.
 `;
 
-/**
- * POST /api/geoai/analyze
- * Body: { imageBase64: string, mimeType: "image/jpeg" | "image/png" | "application/pdf" }
- */
-geoaiRouter.post("/analyze", async (req, res, next) => {
+geoaiRouter.post("/analyze", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { imageBase64, mimeType } = z.object({
-      imageBase64: z.string().min(100),
-      mimeType: z.enum(["image/jpeg", "image/png", "image/tiff", "application/pdf"]),
-    }).parse(req.body);
-
     if (!process.env.OPENAI_API_KEY) {
-      return res.status(503).json({ error: "GeoAI not configured — OPENAI_API_KEY missing" });
+      return res.status(503).json({
+        error: "GeoAI not available — OPENAI_API_KEY is not configured on this server. Add it in your Render environment variables.",
+      });
     }
 
-    // Send to GPT-4o Vision
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 2000,
-      messages: [
-        {
+    const parseResult = z.object({
+      imageBase64: z.string().min(100),
+      mimeType: z.enum(["image/jpeg", "image/png", "image/tiff", "application/pdf"]),
+    }).safeParse(req.body);
+
+    if (!parseResult.success) {
+      return res.status(400).json({ error: "Validation failed", details: parseResult.error.errors });
+    }
+
+    const { imageBase64, mimeType } = parseResult.data;
+
+    // Check payload size — OpenAI Vision has a ~20MB image limit
+    const estimatedBytes = imageBase64.length * 0.75;
+    if (estimatedBytes > 18 * 1024 * 1024) {
+      return res.status(413).json({
+        error: "Image too large for GeoAI analysis. Please resize to under 18 MB and try again.",
+      });
+    }
+
+    let response;
+    try {
+      response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        max_tokens: 2000,
+        messages: [{
           role: "user",
           content: [
             {
@@ -85,72 +87,55 @@ geoaiRouter.post("/analyze", async (req, res, next) => {
                 detail: "high",
               },
             },
-            {
-              type: "text",
-              text: SURVEY_EXTRACTION_PROMPT,
-            },
+            { type: "text", text: SURVEY_EXTRACTION_PROMPT },
           ],
-        },
-      ],
-    });
+        }],
+      });
+    } catch (openaiErr: any) {
+      const msg = openaiErr?.message ?? "OpenAI API call failed";
+      console.error("[GeoAI] OpenAI error:", msg);
+      return res.status(502).json({ error: `OpenAI error: ${msg}` });
+    }
 
     const rawContent = response.choices[0]?.message?.content ?? "";
 
-    // Parse JSON from response
     let extraction: any;
     try {
-      // Strip markdown code fences if present
       const jsonStr = rawContent.replace(/```json\n?|\n?```/g, "").trim();
       extraction = JSON.parse(jsonStr);
     } catch {
       return res.status(422).json({
-        error: "AI could not produce structured output",
-        rawResponse: rawContent,
+        error: "AI returned unstructured output — could not parse coordinates. Try a higher resolution scan.",
+        rawResponse: rawContent.slice(0, 500),
       });
     }
 
-    // If we have explicit point coordinates, reconstruct GeoJSON polygon
     let geoJson: any = null;
-    let closureErrorM: number | null = null;
-
     if (extraction.points && extraction.points.length >= 3) {
-      // Convert Northing/Easting to lng/lat
-      // NOTE: This assumes the CRS is known and handled by proj4 on the client.
-      // For the API, we return the raw projected coordinates + CRS for the
-      // client to transform via proj4js.
       geoJson = {
         type: "Polygon",
-        coordinates: [
-          [
-            ...extraction.points.map((pt: any) => [pt.easting, pt.northing]),
-            [extraction.points[0].easting, extraction.points[0].northing], // close ring
-          ],
-        ],
-        _crs: extraction.crs, // non-standard field — client uses this for reprojection
+        coordinates: [[
+          ...extraction.points.map((pt: any) => [pt.easting, pt.northing]),
+          [extraction.points[0].easting, extraction.points[0].northing],
+        ]],
+        _crs: extraction.crs,
       };
     }
 
     res.json({
       extraction,
       geoJson,
-      closureErrorM,
+      closureErrorM: null,
       requiresManualReview: extraction.confidence === "low",
     });
   } catch (err) {
-    if (err instanceof z.ZodError) return res.status(400).json({ error: "Validation failed", details: err.errors });
     next(err);
   }
 });
 
-/**
- * POST /api/geoai/confirm
- * After the user confirms the auto-georeferenced polygon on the map,
- * this endpoint creates the parcel record.
- * Body: { parcelNumber, geoJsonWgs84 (reprojected by client), confidence, metadata }
- */
-geoaiRouter.post("/confirm", async (req, res, next) => {
+geoaiRouter.post("/confirm", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const body = z.object({
+    const parseResult = z.object({
       parcelNumber: z.string().min(1),
       geoJsonWgs84: z.object({ type: z.string(), coordinates: z.array(z.any()) }),
       confidence: z.enum(["high", "medium", "low", "manual"]),
@@ -161,10 +146,15 @@ geoaiRouter.post("/confirm", async (req, res, next) => {
         planRef: z.string().optional(),
         originalCrs: z.string().optional(),
       }).optional(),
-    }).parse(req.body);
+    }).safeParse(req.body);
 
-    // Create parcel
-    const [parcel] = await sql`
+    if (!parseResult.success) {
+      return res.status(400).json({ error: "Validation failed", details: parseResult.error.errors });
+    }
+
+    const body = parseResult.data;
+
+    const parcelRows = await sql`
       INSERT INTO parcels (parcel_number, geometry, status)
       VALUES (
         ${body.parcelNumber},
@@ -173,8 +163,8 @@ geoaiRouter.post("/confirm", async (req, res, next) => {
       )
       RETURNING id, parcel_number, status
     `;
+    const parcel = parcelRows[0];
 
-    // Create survey record
     if (body.metadata) {
       await sql`
         INSERT INTO surveys (
@@ -200,7 +190,6 @@ geoaiRouter.post("/confirm", async (req, res, next) => {
       message: "Parcel registered successfully",
     });
   } catch (err) {
-    if (err instanceof z.ZodError) return res.status(400).json({ error: "Validation failed", details: err.errors });
     next(err);
   }
 });
