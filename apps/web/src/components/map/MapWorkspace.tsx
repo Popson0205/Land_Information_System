@@ -45,63 +45,21 @@ interface Props {
   previewPlan: ExtractedPlan | null;
   onRefreshReady: (fn: () => void) => void;
   onFlyToReady: (fn: (parcelId: string) => void) => void;
+  onFlyToCoordReady: (fn: (lng: number, lat: number, zoom?: number) => void) => void;
 }
 
-export function MapWorkspace({ onParcelClick, previewPlan, onRefreshReady, onFlyToReady }: Props) {
+export function MapWorkspace({ onParcelClick, previewPlan, onRefreshReady, onFlyToReady, onFlyToCoordReady }: Props) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const mapLoaded = useRef(false);
-
-  const flyToParcel = useCallback(async (parcelId: string) => {
-    if (!map.current || !mapLoaded.current) return;
-    try {
-      const API_URL = import.meta.env.VITE_API_URL?.replace(/\/$/, "") ?? "http://localhost:4000";
-      const res = await fetch(`${API_URL}/api/parcels/${parcelId}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      const geom = data.geometry;
-      if (!geom) return;
-
-      // Get all coordinates from the geometry
-      const allCoords: number[][] = [];
-      const extract = (coords: any) => {
-        if (typeof coords[0] === "number") allCoords.push(coords);
-        else coords.forEach(extract);
-      };
-      extract(geom.coordinates);
-
-      if (!allCoords.length) return;
-
-      const lngs = allCoords.map(c => c[0]);
-      const lats = allCoords.map(c => c[1]);
-
-      map.current.fitBounds(
-        [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
-        { padding: 100, maxZoom: 19, duration: 1500 }
-      );
-
-      // Flash highlight the new parcel
-      setTimeout(() => {
-        if (!map.current) return;
-        map.current.setPaintProperty(PREVIEW_FILL_LAYER, "fill-color", "#27AE60");
-        map.current.setPaintProperty(PREVIEW_FILL_LAYER, "fill-opacity", 0.4);
-        setTimeout(() => {
-          map.current?.setPaintProperty(PREVIEW_FILL_LAYER, "fill-color", "#F1C40F");
-          map.current?.setPaintProperty(PREVIEW_FILL_LAYER, "fill-opacity", 0.25);
-        }, 1200);
-      }, 800);
-    } catch { /* ignore */ }
-  }, []);
-
-  // Expose flyToParcel to parent
-  useEffect(() => {
-    onFlyToReady(flyToParcel);
-  }, [flyToParcel, onFlyToReady]);
+  // Store loaded GeoJSON so flyTo can find parcel bounds without re-fetching
+  const parcelsDataRef = useRef<GeoJSON.FeatureCollection | null>(null);
 
   const loadParcels = useCallback(async () => {
     if (!map.current || !mapLoaded.current) return;
     try {
       const geojson = await fetchParcels();
+      parcelsDataRef.current = geojson;
       const source = map.current.getSource(PARCEL_SOURCE) as maplibregl.GeoJSONSource | undefined;
       source?.setData(geojson);
     } catch (err) {
@@ -109,45 +67,71 @@ export function MapWorkspace({ onParcelClick, previewPlan, onRefreshReady, onFly
     }
   }, []);
 
-  // Expose loadParcels to parent so it can trigger refresh after registration
-  useEffect(() => {
-    onRefreshReady(loadParcels);
-  }, [loadParcels, onRefreshReady]);
+  // Fly to a parcel by ID — uses already-loaded GeoJSON (WGS84) from the source
+  const flyToParcel = useCallback((parcelId: string) => {
+    if (!map.current || !mapLoaded.current) return;
+    const geojson = parcelsDataRef.current;
+    if (!geojson) return;
 
-  // Preview layer — show extracted plan polygon on map
+    const feature = geojson.features.find(
+      (f) => f.id === parcelId || (f.properties as any)?.id === parcelId
+    );
+    if (!feature?.geometry) return;
+
+    const allCoords: number[][] = [];
+    const extract = (c: any) => {
+      if (typeof c[0] === "number") allCoords.push(c);
+      else c.forEach(extract);
+    };
+    extract((feature.geometry as any).coordinates);
+    if (!allCoords.length) return;
+
+    const lngs = allCoords.map(c => c[0]);
+    const lats = allCoords.map(c => c[1]);
+
+    map.current.fitBounds(
+      [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+      { padding: 120, maxZoom: 19, duration: 1500 }
+    );
+  }, []);
+
+  // Fly to explicit WGS84 coordinate (for parcel list clicks)
+  const flyToCoord = useCallback((lng: number, lat: number, zoom = 18) => {
+    if (!map.current) return;
+    map.current.flyTo({ center: [lng, lat], zoom, duration: 1200 });
+  }, []);
+
+  useEffect(() => { onRefreshReady(loadParcels); }, [loadParcels, onRefreshReady]);
+  useEffect(() => { onFlyToReady(flyToParcel); }, [flyToParcel, onFlyToReady]);
+  useEffect(() => { onFlyToCoordReady(flyToCoord); }, [flyToCoord, onFlyToCoordReady]);
+
+  // Preview layer
   useEffect(() => {
     if (!map.current || !mapLoaded.current) return;
-
     const previewSource = map.current.getSource(PREVIEW_SOURCE) as maplibregl.GeoJSONSource | undefined;
-
     if (!previewPlan?.geoJson) {
-      // Clear preview
       previewSource?.setData({ type: "FeatureCollection", features: [] });
       return;
     }
-
     const feature: GeoJSON.Feature = {
       type: "Feature",
       geometry: previewPlan.geoJson,
       properties: { confidence: previewPlan.confidence },
     };
     previewSource?.setData({ type: "FeatureCollection", features: [feature] });
-
-    // Fly to preview polygon
     try {
       const coords = previewPlan.geoJson.type === "Polygon"
-        ? previewPlan.geoJson.coordinates[0]
+        ? (previewPlan.geoJson as GeoJSON.Polygon).coordinates[0]
         : (previewPlan.geoJson as any).coordinates[0][0];
-
       if (coords?.length) {
         const lngs = coords.map((c: number[]) => c[0]);
         const lats = coords.map((c: number[]) => c[1]);
-        map.current.fitBounds(
+        map.current?.fitBounds(
           [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
           { padding: 120, maxZoom: 18, duration: 1200 }
         );
       }
-    } catch { /* ignore fit errors */ }
+    } catch { /* ignore */ }
   }, [previewPlan]);
 
   useEffect(() => {
@@ -167,7 +151,6 @@ export function MapWorkspace({ onParcelClick, previewPlan, onRefreshReady, onFly
       if (!map.current) return;
       mapLoaded.current = true;
 
-      // ─── Registered parcels source & layers ──────────────────────────────
       map.current.addSource(PARCEL_SOURCE, {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -196,7 +179,6 @@ export function MapWorkspace({ onParcelClick, previewPlan, onRefreshReady, onFly
         paint: { "line-color": "#E74C3C", "line-width": 2, "line-dasharray": [4, 2] },
       });
 
-      // ─── Preview source & layers (for import flow) ────────────────────────
       map.current.addSource(PREVIEW_SOURCE, {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -209,16 +191,11 @@ export function MapWorkspace({ onParcelClick, previewPlan, onRefreshReady, onFly
 
       map.current.addLayer({
         id: PREVIEW_OUTLINE_LAYER, type: "line", source: PREVIEW_SOURCE,
-        paint: {
-          "line-color": "#F1C40F",
-          "line-width": 3,
-          "line-dasharray": [6, 3],
-        },
+        paint: { "line-color": "#F1C40F", "line-width": 3, "line-dasharray": [6, 3] },
       });
 
       await loadParcels();
 
-      // ─── Hover ────────────────────────────────────────────────────────────
       let hoveredId: number | string | null = null;
       map.current.on("mousemove", PARCEL_FILL_LAYER, (e) => {
         if (!map.current || !e.features?.length) return;
@@ -234,7 +211,6 @@ export function MapWorkspace({ onParcelClick, previewPlan, onRefreshReady, onFly
         hoveredId = null;
       });
 
-      // ─── Click ────────────────────────────────────────────────────────────
       map.current.on("click", PARCEL_FILL_LAYER, (e) => {
         if (!e.features?.length) return;
         onParcelClick(e.features[0] as unknown as ParcelFeature);
@@ -247,15 +223,12 @@ export function MapWorkspace({ onParcelClick, previewPlan, onRefreshReady, onFly
   return (
     <div className="relative flex-1 h-full">
       <div ref={mapContainer} className="absolute inset-0" />
-
-      {/* Preview badge */}
       {previewPlan && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 bg-yellow-900/90 border border-yellow-600
                         text-yellow-300 text-xs px-4 py-2 rounded-full shadow-lg backdrop-blur-sm font-medium">
           ⬡ Preview — confirm in the import panel to register
         </div>
       )}
-
       <button
         onClick={loadParcels}
         className="absolute bottom-8 left-4 z-10 bg-gray-900/80 border border-gray-700 text-gray-300

@@ -1,10 +1,12 @@
-import { Map, Search, Upload, BarChart2 } from "lucide-react";
+import { Map, Search, Upload, BarChart2, List } from "lucide-react";
 
 interface Props {
   onImportClick: () => void;
+  onRegistryClick: () => void;
+  registryOpen: boolean;
 }
 
-export function TopBar({ onImportClick }: Props) {
+export function TopBar({ onImportClick, onRegistryClick, registryOpen }: Props) {
   return (
     <header className="h-12 bg-gray-900 border-b border-gray-700 flex items-center px-4 gap-4 shrink-0">
       <div className="flex items-center gap-2 mr-4">
@@ -25,6 +27,17 @@ export function TopBar({ onImportClick }: Props) {
       <div className="flex-1" />
 
       <nav className="flex items-center gap-1">
+        <button
+          onClick={onRegistryClick}
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors border
+            ${registryOpen
+              ? "bg-blue-700 text-white border-blue-600"
+              : "text-gray-300 hover:text-white hover:bg-gray-800 border-transparent hover:border-gray-700"
+            }`}
+        >
+          <List size={13} />
+          Registry
+        </button>
         <button
           onClick={onImportClick}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-300
